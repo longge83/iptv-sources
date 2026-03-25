@@ -73,6 +73,7 @@ RUN mkdir -p /var/log/nginx /var/run /var/cache/nginx \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /app/m3u ./m3u/
+COPY --from=builder /app/public ./public/
 COPY --from=builder /app/package.json \
 /app/LIST.temp.md \
 /app/README.temp.md ./
