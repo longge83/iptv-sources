@@ -8,23 +8,26 @@
  *  4. 去重合并后由 Builder 输出一份完整的 XMLTV XML
  */
 
+import { mkdir, writeFile } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { writeEpgJsonFromXml } from '../file';
 import type { EpgChannelJson } from './parser';
-import { writeFile } from 'fs/promises';
-import path from 'path';
-import { mkdir } from 'fs/promises';
+import { formatHourMinute, parseXmltvTimestamp } from './time';
 import {
   buildXmlDocument,
   normalizeXmlList,
+  parseXmltvRoot,
   readXmlAttr,
   readXmltvChannelName,
   readXmltvProgrammeTitle,
-  parseXmltvRoot,
   type XmltvChannelNode,
   type XmltvNode,
   type XmltvProgrammeNode,
 } from './xml';
-import { formatHourMinute, parseXmltvUtcTimestamp } from './time';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface EpgPwChannel {
   id: string;
@@ -57,6 +60,17 @@ function formatDate(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}${m}${d}`;
+}
+
+function genTvBoxDateString(originalString: string): string {
+  const y = originalString.slice(0, 4);
+  const m = originalString.slice(4, 6);
+  const d = originalString.slice(6, 8);
+  return `${y}-${m}-${d}`;
+}
+
+function genTvBoxChannelName(originalString: string): string {
+  return originalString.toUpperCase();
 }
 
 async function fetchChannelEpg(channelId: string, date: string): Promise<string | null> {
@@ -105,8 +119,8 @@ export function buildPwChannelJson(
     channel,
     epg_data: programmes
       .map((programme) => {
-        const startTime = parseXmltvUtcTimestamp(readXmlAttr(programme, 'start'));
-        const endTime = parseXmltvUtcTimestamp(readXmlAttr(programme, 'stop'));
+        const startTime = parseXmltvTimestamp(readXmlAttr(programme, 'start'));
+        const endTime = parseXmltvTimestamp(readXmlAttr(programme, 'stop'));
         if (!startTime || !endTime) return null;
 
         return {
@@ -144,7 +158,7 @@ export async function buildEpgPwXml(batchSize = 10, delayMs = 300): Promise<stri
 
   const dates: string[] = [];
   const today = new Date();
-  for (let i = 0; i < 7; i++) {
+  for (let i = -5; i < 2; i++) {
     const date = new Date(today);
     date.setDate(today.getDate() + i);
     dates.push(formatDate(date));
@@ -158,7 +172,8 @@ export async function buildEpgPwXml(batchSize = 10, delayMs = 300): Promise<stri
 
   for (const date of dates) {
     console.log(`[EPG.PW] Fetching EPG for date ${date} ...`);
-
+    const savePath = path.join(basePath, genTvBoxDateString(date));
+    await mkdir(savePath, { recursive: true });
     for (let i = 0; i < channels.length; i += batchSize) {
       const batch = channels.slice(i, i + batchSize);
       const results = await Promise.allSettled(batch.map((ch) => fetchChannelEpg(ch.id, date)));
@@ -176,10 +191,10 @@ export async function buildEpgPwXml(batchSize = 10, delayMs = 300): Promise<stri
         }
 
         const json = buildPwChannelJson(channel, programmes);
-        const currentChannelName = json.channel;
-        const savePath = await mkdir(path.join(basePath, currentChannelName), { recursive: true });
+        const currentChannelName = genTvBoxChannelName(json.channel);
+
         await writeFile(
-          path.join(savePath as string, `${date}.json`),
+          path.join(savePath as string, `${currentChannelName}.json`),
           JSON.stringify(json, null, 2)
         );
         programmeNodes.push(...programmes);
